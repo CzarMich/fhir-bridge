@@ -1,6 +1,7 @@
 package org.ehrbase.fhirbridge.ehr.converter.specific.geccodiagnose;
 
 import ca.uhn.fhir.rest.server.exceptions.UnprocessableEntityException;
+import org.ehrbase.fhirbridge.ehr.converter.ConversionException;
 import org.ehrbase.fhirbridge.ehr.converter.generic.DvCodedTextParser;
 import org.ehrbase.fhirbridge.ehr.converter.generic.EntryEntityConverter;
 import org.ehrbase.fhirbridge.ehr.converter.generic.TimeConverter;
@@ -103,6 +104,8 @@ public class VorliegendeDiagnoseEvaluationConverter extends EntryEntityConverter
                     vorliegendeDiagnose.setNameDesProblemsDerDiagnose(vorliegendeDiagnoseNameDesProblemsDerDiagnoseDvCodedText);
                     isEmpty = false;
                 }
+            }else{
+                throw new ConversionException("The SNOMED code is either not SNOMED code at all or one that is not supported by the FHIR profile.");
             }
         }
     }
