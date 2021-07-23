@@ -5,7 +5,7 @@ import org.apache.camel.Endpoint;
 import org.apache.camel.support.DefaultComponent;
 import org.ehrbase.client.openehrclient.OpenEhrClient;
 import org.ehrbase.fhirbridge.camel.component.ehr.EhrConfiguration;
-import org.ehrbase.fhirbridge.config.DebugProperties;
+import org.ehrbase.fhirbridge.config.FhirBridgeProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +48,8 @@ public class CompositionComponent extends DefaultComponent {
 
     @Override
     protected Endpoint createEndpoint(String uri, String remaining, Map<String, Object> parameters) throws Exception {
-        DebugProperties properties = getCamelContext().getRegistry().lookupByNameAndType("debugProperties", DebugProperties.class);
+        FhirBridgeProperties properties = getCamelContext().getRegistry()
+                .lookupByNameAndType("fhirBridgeProperties", FhirBridgeProperties.class);
         final EhrConfiguration newConfiguration = configuration.copy();
         CompositionEndpoint endpoint = new CompositionEndpoint(uri, this, newConfiguration);
         endpoint.setProperties(properties);
