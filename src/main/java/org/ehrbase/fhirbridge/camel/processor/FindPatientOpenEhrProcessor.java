@@ -227,7 +227,7 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
             //
             // Encounter => Patientenaufenthalt (openEHR-EHR-COMPOSITION.event_summary.v0)
             // Encounter => Stationärer Versorgungsfall (openEHR-EHR-COMPOSITION.fall.v1)
-            System.out.println(outParam.getValue());
+            //System.out.println(outParam.getValue());
 
             if (outParam.getTargetResource().equals("Encounter")) {
                 subjectIds.addAll(handleQueryForEncounter(outParam));
