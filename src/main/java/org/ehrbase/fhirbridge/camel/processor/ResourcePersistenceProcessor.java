@@ -18,7 +18,6 @@ package org.ehrbase.fhirbridge.camel.processor;
 
 import ca.uhn.fhir.jpa.api.dao.DaoRegistry;
 import ca.uhn.fhir.jpa.api.dao.IFhirResourceDao;
-import ca.uhn.fhir.jpa.searchparam.SearchParameterMap;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.api.RestOperationTypeEnum;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
@@ -27,6 +26,7 @@ import org.apache.camel.Exchange;
 import org.ehrbase.fhirbridge.camel.CamelConstants;
 import org.ehrbase.fhirbridge.core.domain.ResourceComposition;
 import org.ehrbase.fhirbridge.core.repository.ResourceCompositionRepository;
+import org.ehrbase.fhirbridge.fhir.auditevent.SearchParametersWrapper;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.Resource;
@@ -121,9 +121,9 @@ public class ResourcePersistenceProcessor implements FhirRequestProcessor {
     private void handleSearchOperation(Exchange exchange, RequestDetails requestDetails, IFhirResourceDao resourceDao) {
         LOG.trace("Searching {} resources...", requestDetails.getResourceName());
 
-        SearchParameterMap parameters = exchange.getIn().getBody(SearchParameterMap.class);
+        SearchParametersWrapper wrapper = exchange.getIn().getHeader(Constants.FHIR_REQUEST_PARAMETERS, SearchParametersWrapper.class);
 
-        IBundleProvider bundleProvider = resourceDao.search(parameters, requestDetails);
+        IBundleProvider bundleProvider = resourceDao.search(wrapper.getSearchParameters(), requestDetails);
 
         if (exchange.getIn().getHeaders().containsKey(Constants.FHIR_REQUEST_SIZE_ONLY)) {
             exchange.getMessage().setHeader(Constants.FHIR_REQUEST_SIZE_ONLY, bundleProvider.size());

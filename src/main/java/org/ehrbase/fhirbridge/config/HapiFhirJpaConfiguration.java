@@ -30,6 +30,7 @@ import ca.uhn.fhir.jpa.dao.r4.FhirResourceDaoSearchParameterR4;
 import ca.uhn.fhir.jpa.dao.r4.FhirResourceDaoValueSetR4;
 import ca.uhn.fhir.jpa.model.config.PartitionSettings;
 import ca.uhn.fhir.jpa.model.entity.ModelConfig;
+import ca.uhn.fhir.jpa.search.DatabaseBackedPagingProvider;
 import org.hl7.fhir.r4.model.AuditEvent;
 import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.CodeableConcept;
@@ -63,6 +64,20 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(HapiFhirJpaProperties.class)
 @SuppressWarnings("java:S6212")
 public class HapiFhirJpaConfiguration extends BaseR4Config {
+
+    private final FhirProperties properties;
+
+    public HapiFhirJpaConfiguration(FhirProperties properties) {
+        this.properties = properties;
+    }
+
+    @Override
+    public DatabaseBackedPagingProvider databaseBackedPagingProvider() {
+        DatabaseBackedPagingProvider pagingProvider = new DatabaseBackedPagingProvider();
+        pagingProvider.setDefaultPageSize(properties.getPageable().getDefaultPageSize());
+        pagingProvider.setMaximumPageSize(properties.getPageable().getMaxPageSize());
+        return pagingProvider;
+    }
 
     @Bean
     public DaoConfig daoConfig(HapiFhirJpaProperties properties) {

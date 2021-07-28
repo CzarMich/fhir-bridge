@@ -129,6 +129,8 @@ public class FindAuditEventProvider extends AbstractPlainProvider {
         parameters.setOffset(offset);
         parameters.setSort(sort);
 
-        return requestBundleProvider(parameters, null, ResourceType.AuditEvent.name(), request, response, requestDetails);
+        SearchParametersWrapper searchParams = new SearchParametersWrapper(getFhirContext(), parameters);
+
+        return requestBundleProvider(null, searchParams, ResourceType.AuditEvent.name(), request, response, requestDetails);
     }
 }
