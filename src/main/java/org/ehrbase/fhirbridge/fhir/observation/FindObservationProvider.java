@@ -25,7 +25,9 @@ import ca.uhn.fhir.rest.annotation.Read;
 import ca.uhn.fhir.rest.annotation.Search;
 import ca.uhn.fhir.rest.annotation.Sort;
 import ca.uhn.fhir.rest.api.Constants;
+import ca.uhn.fhir.rest.api.SearchTotalModeEnum;
 import ca.uhn.fhir.rest.api.SortSpec;
+import ca.uhn.fhir.rest.api.SummaryEnum;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
 import ca.uhn.fhir.rest.api.server.RequestDetails;
 import ca.uhn.fhir.rest.param.CompositeAndListParam;
@@ -115,6 +117,8 @@ public class FindObservationProvider extends AbstractPlainProvider {
                                              @OptionalParam(name = Observation.SP_VALUE_QUANTITY) QuantityAndListParam valueQuantity,
                                              @OptionalParam(name = Observation.SP_VALUE_STRING) StringAndListParam valueString,
                                              @Count Integer count, @Offset Integer offset, @Sort SortSpec sort,
+                                             SummaryEnum summaryMode,
+                                             SearchTotalModeEnum searchTotalMode,
                                              RequestDetails requestDetails, HttpServletRequest request, HttpServletResponse response) {
 
         SearchParameterMap searchParams = new SearchParameterMap();
@@ -172,6 +176,8 @@ public class FindObservationProvider extends AbstractPlainProvider {
         searchParams.setCount(count);
         searchParams.setOffset(offset);
         searchParams.setSort(sort);
+        searchParams.setSearchTotalMode(searchTotalMode);
+        searchParams.setSummaryMode(summaryMode);
 
         return requestBundleProvider(searchParams, null, ResourceType.Observation.name(), request, response, requestDetails);
     }

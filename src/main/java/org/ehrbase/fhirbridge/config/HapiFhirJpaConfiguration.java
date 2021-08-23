@@ -73,7 +73,7 @@ public class HapiFhirJpaConfiguration extends BaseR4Config {
 
     @Override
     public DatabaseBackedPagingProvider databaseBackedPagingProvider() {
-        DatabaseBackedPagingProvider pagingProvider = new DatabaseBackedPagingProvider();
+        DatabaseBackedPagingProvider pagingProvider = super.databaseBackedPagingProvider();
         pagingProvider.setDefaultPageSize(properties.getPageable().getDefaultPageSize());
         pagingProvider.setMaximumPageSize(properties.getPageable().getMaxPageSize());
         return pagingProvider;

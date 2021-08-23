@@ -25,7 +25,9 @@ import ca.uhn.fhir.rest.annotation.Read;
 import ca.uhn.fhir.rest.annotation.Search;
 import ca.uhn.fhir.rest.annotation.Sort;
 import ca.uhn.fhir.rest.api.Constants;
+import ca.uhn.fhir.rest.api.SearchTotalModeEnum;
 import ca.uhn.fhir.rest.api.SortSpec;
+import ca.uhn.fhir.rest.api.SummaryEnum;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
 import ca.uhn.fhir.rest.api.server.RequestDetails;
 import ca.uhn.fhir.rest.param.DateRangeParam;
@@ -90,6 +92,8 @@ public class FindAuditEventProvider extends AbstractPlainProvider {
                                   @OptionalParam(name = AuditEvent.SP_SUBTYPE) TokenAndListParam subtype,
                                   @OptionalParam(name = AuditEvent.SP_TYPE) TokenAndListParam type,
                                   @Count Integer count, @Offset Integer offset, @Sort SortSpec sort,
+                                  SummaryEnum summaryMode,
+                                  SearchTotalModeEnum searchTotalMode,
                                   RequestDetails requestDetails, HttpServletRequest request, HttpServletResponse response) {
 
         SearchParameterMap parameters = new SearchParameterMap();
@@ -128,6 +132,8 @@ public class FindAuditEventProvider extends AbstractPlainProvider {
         parameters.setCount(count);
         parameters.setOffset(offset);
         parameters.setSort(sort);
+        parameters.setSearchTotalMode(searchTotalMode);
+        parameters.setSummaryMode(summaryMode);
 
         SearchParametersWrapper searchParams = new SearchParametersWrapper(getFhirContext(), parameters);
 
