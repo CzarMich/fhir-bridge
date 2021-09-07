@@ -85,16 +85,19 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
         /*
         Sample paramName and values:
         _summary:
-        count
+          count
+
         _has:Encounter:patient:date:
-        2020
-        # if the same parameter name appears twice in the request, here we have just one name with two values
-        # note for the 'code' attribute we can have a string value that represents a list of values, but it comes as a single string
+          2020
+
+        # if the same parameter name appears twice in the request, here we have one name with two values
+        # for the 'code' attribute each value could represent a single or list of values, in both cases it is a string that should be parsed as CSV
         _has:Observation:patient:code:
-        2160-0,14682-9,3091-6,22664-7
-        1743-4,1742-6,30239-8,1920-8,88112-8
+          2160-0,14682-9,3091-6,22664-7
+          1743-4,1742-6,30239-8,1920-8,88112-8
+
         _has:Condition:patient:code:
-        C34.0,C34.1,C34.2,C34.3,C34.8,C34.9
+          C34.0,C34.1,C34.2,C34.3,C34.8,C34.9
         */
         RequestDetails request = getRequestDetails(exchange);
         Map<String, String[]> inParams = request.getParameters();
@@ -111,16 +114,18 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
 
         for (String paramName : inParams.keySet()) {
 
-            // paramName: _has:Encounter:patient:date or _summary or _has:Encounter:patient:date
-            String[] paramValues = inParams.get(paramName);
-
-            if (paramName.startsWith("_summary") && paramValues.length > 0) {
+            // avoid processing _summary
+            if (paramName.startsWith("_summary")) {
 
                 // this will be handled below by the headers of the camel message
                 // paramValues[0].equals("count") means we should return only the count
                 continue;
+            }
 
-            } else if (paramName.startsWith("_has")) {
+            // paramName: _has:Encounter:patient:date or _summary or _has:Encounter:patient:date
+            String[] paramValues = inParams.get(paramName); // multiple values per param name, each value could be a list if the attribute in the _has is 'code'
+
+            if (paramName.startsWith("_has")) {
 
                 for (int i = 0; i < paramValues.length; i++) { // multiple values if the same param was submitted more than once
 
@@ -150,7 +155,7 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
 
                         for (String code : codeValues) {
 
-                            templateIds = this.findMatchingTemplates(code);
+                            templateIds = this.findMatchingTemplates(code); // could be empty if there are no mappings for the code
 
                             // one outParam for each code in the list
                             // if the matching template is the same, all the codes could be joined in the query, but just for that template
@@ -164,18 +169,19 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
                             // SELECT .. FROM ... WHERE path2 matches {code1, code2}
                             // SELECT .. FROM ... WHERE path3 = code2
                             HasParamTemplate outParam = new HasParamTemplate(
-                                    tmpParam.getTargetResourceType(),
-                                    tmpParam.getParameterName(),
-                                    code,
-                                    templateIds
+                                tmpParam.getTargetResourceType(),
+                                tmpParam.getParameterName(),
+                                code,
+                                templateIds
                             );
 
                             // build aux structure to join all params that will be used ont the AQL query for the same templateId
                             List<HasParamTemplate> templateParams;
-                            boolean isTemplateParam = false;
 
                             for (String templateId : templateIds) {
 
+                                // accumulates params for template based queries in templateParamMap
+                                // the rest are accumulated in outParams
                                 templateParams = templateParamMap.get(templateId);
 
                                 if (templateParams == null) { // initialize the list for the current templateId key
@@ -188,14 +194,12 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
 
                                     templateParams.add(outParam);
                                 }
-
-                                // true only if there are matching templates for the code value
-                                isTemplateParam = true;
                             }
 
                             // outParams has all the params that are not going to be used in queries based on templateIds
-                            if (!isTemplateParam) {
-                                outParams.add(outParam);
+                            if (templateIds.isEmpty()) {
+                                //outParams.add(outParam);
+                                LOG.warn("No matching mapping for code '"+ code +"' (won't be used to query)");
                             }
                         }
                     } else if (tmpParam.getParameterName().equals("date")) {
@@ -213,10 +217,20 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
             }
         }
 
-        // execute queries based on the processed parameters and join results
+        // Execute one query for each processed parameter (out params or template params joined by same templateID)
+        // For a result to be counted, each of those queries should retrieve the same value (subjectId)
+        // Then the first result is kept, and the rest are intersected with that one, creating an AND processing
+        // If any result is empty, there is no need to execute the following queries, we know the total result will be empty/zero
+
+        int totalQueries = outParams.size() + templateParamMap.size();
+        int executedQueries = 0;
+
+        // execute queries based on the processed parameters and intersect results
         // note for unsupported parameters, or for codes that don't have a matching template, no AQL will be
         // executed without throwing an exception
         Set<String> subjectIds = new HashSet<>();
+        Set<String> tmpResult;
+        boolean emptyResult = false;
 
         // process queries not based on templates
         for (HasParamTemplate outParam : outParams) {
@@ -230,20 +244,76 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
             //System.out.println(outParam.getValue());
 
             if (outParam.getTargetResource().equals("Encounter")) {
-                subjectIds.addAll(handleQueryForEncounter(outParam));
+
+                tmpResult = handleQueryForEncounter(outParam);
+
+                LOG.info("Executed Query: "+ outParam.targetParamName);
+
+                if (tmpResult.isEmpty()) {
+                    executedQueries++;
+                    emptyResult = true;
+                    break;
+                }
+
+                if (executedQueries == 0) {
+                    subjectIds.addAll(tmpResult);
+                } else {
+                    subjectIds.retainAll(tmpResult); // does an intersection ~ AND
+                }
+                executedQueries++;
+            } else {
+                LOG.info("Ignoring param "+ outParam.targetParamName);
             }
         }
 
-        // process queries based on templates
-        for (Map.Entry<String, List<HasParamTemplate>> templateParamsEntry : templateParamMap.entrySet()) {
+        if (!emptyResult) {
 
-            if (templateParamsEntry.getKey().equals("GECCO_Laborbefund")) {
-                subjectIds.addAll(handleQueryForGECCO_Laborbefund(templateParamsEntry.getValue()));
-            } else if (templateParamsEntry.getKey().equals("GECCO_Laborbefund")) {
-                subjectIds.addAll(handleQueryForGECCO_Diagnose(templateParamsEntry.getValue()));
+            // process queries based on templates
+            for (Map.Entry<String, List<HasParamTemplate>> templateParamsEntry : templateParamMap.entrySet()) {
+
+                if (templateParamsEntry.getKey().equals("GECCO_Laborbefund")) {
+
+                    tmpResult = handleQueryForGECCO_Laborbefund(templateParamsEntry.getValue());
+
+                    LOG.info("Executed Query For Template: "+ templateParamsEntry.getKey());
+
+                    if (tmpResult.isEmpty()) {
+                        executedQueries++;
+                        emptyResult = true;
+                        break;
+                    }
+                    if (executedQueries == 0) {
+                        subjectIds.addAll(tmpResult);
+                    } else {
+                        subjectIds.retainAll(tmpResult); // does an intersection ~ AND
+                    }
+                    executedQueries++;
+
+                } else if (templateParamsEntry.getKey().equals("GECCO_Laborbefund")) {
+
+                    tmpResult = handleQueryForGECCO_Diagnose(templateParamsEntry.getValue());
+
+                    LOG.info("Executed Query For Template: "+ templateParamsEntry.getKey());
+
+                    if (tmpResult.isEmpty()) {
+                        executedQueries++;
+                        emptyResult = true;
+                        break;
+                    }
+                    if (executedQueries == 0) {
+                        subjectIds.addAll(tmpResult);
+                    } else {
+                        subjectIds.retainAll(tmpResult); // does an intersection ~ AND
+                    }
+                    executedQueries++;
+                }
             }
         }
 
+        LOG.info("Executed Queries: "+ executedQueries);
+        LOG.info("Total Queries: "+ totalQueries);
+        LOG.info("Empty Result: "+ emptyResult);
+        LOG.info("Subject IDs: "+ subjectIds.toString());
 
         // Create bundle result of Patient just with the subjectId from openEHR
         List<IBaseResource> result = subjectIds.stream()
@@ -256,7 +326,7 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
         if (exchange.getIn().getHeaders().containsKey(Constants.FHIR_REQUEST_SIZE_ONLY)) {
             exchange.getMessage().setHeader(Constants.FHIR_REQUEST_SIZE_ONLY, result.size()); // required if param _summary=count
         } else {
-            // FIXME: this is not paginated, could be big
+            // FIXME: this is not paginated, could be big. Check how the pagination params are read.
             // Integer from = exchange.getIn().getHeader(Constants.FHIR_FROM_INDEX, Integer.class);
             // Integer to = exchange.getIn().getHeader(Constants.FHIR_TO_INDEX, Integer.class);
             exchange.getMessage().setBody(result);
@@ -381,19 +451,22 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
 
         LOG.info(aql);
 
-        // Execute the AQL
-        Query<Record1<String>> query = Query.buildNativeQuery(aql, String.class);
+        // execute query only if there is a matching supported param
+        if (aql.contains("WHERE")) {
 
-        List<Record1<String>> results = new ArrayList<>();
+            Query<Record1<String>> query = Query.buildNativeQuery(aql, String.class);
 
-        try {
-            results = this.openEhrClient.aqlEndpoint().execute(query);
+            List<Record1<String>> results = new ArrayList<>();
 
-            for (Record1<String> record : results) {
-                subjectIds.add(record.value1());
+            try {
+                results = this.openEhrClient.aqlEndpoint().execute(query);
+
+                for (Record1<String> record : results) {
+                    subjectIds.add(record.value1());
+                }
+            } catch (Exception e) {
+                throw new InternalErrorException("There was a problem retrieving the result", e);
             }
-        } catch (Exception e) {
-            throw new InternalErrorException("There was a problem retrieving the result", e);
         }
 
         return subjectIds;
@@ -459,17 +532,22 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
                 "FROM EHR e " +
                 "CONTAINS (COMPOSITION c1[openEHR-EHR-COMPOSITION.event_summary.v0] OR COMPOSITION c2[openEHR-EHR-COMPOSITION.fall.v1]) ";
 
+        // FIXME: this works when the operator is =, like '=2020', when it is gt like '=gt2020', the operator should be parsed from the value
         // processing _has:Encounter:patient:date=2020
         if (param.targetParamName.equals("date")) {
 
             String dateValue = param.getValue();
             String dateQuery = "";
+
             if (dateValue.length() == 4) { // year only
-                dateQuery += "WHERE c1/context/start_time >= '" + dateValue + "-01-01' AND c1/context/start_time <= '" + dateValue + "-12-31' ";
-                dateQuery += "OR c2/context/start_time >= '" + dateValue + "-01-01' AND c2/context/start_time <= '" + dateValue + "-12-31' ";
+                dateQuery += "WHERE c1/context/start_time/value >= '" + dateValue + "-01-01' AND c1/context/start_time/value <= '" + dateValue + "-12-31' ";
+                dateQuery += "OR c2/context/start_time/value >= '" + dateValue + "-01-01' AND c2/context/start_time/value <= '" + dateValue + "-12-31' ";
             }
+            // TODO: extend to Y+M and Y+M+D
 
             aql += dateQuery;
+        } else {
+            LOG.warn("Parameter name "+ param.targetParamName +" for Encounter is not supported yet, only 'date' is supported");
         }
 
         LOG.info(aql);
