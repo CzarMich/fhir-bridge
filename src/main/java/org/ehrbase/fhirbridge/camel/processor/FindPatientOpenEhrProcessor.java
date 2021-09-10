@@ -272,6 +272,8 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
 
             if (outParam.getTargetResource().equals("Encounter")) {
 
+                // NOTE: this will search by one date not a date range, since it accepts one date param value at a time,
+                // to search by a date range, the outParams for the Encounter should be grouped together
                 tmpResult = handleQueryForEncounter(outParam);
 
                 LOG.info("Executed Query: "+ outParam.targetParamName);
@@ -559,18 +561,25 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
                 "FROM EHR e " +
                 "CONTAINS (COMPOSITION c1[openEHR-EHR-COMPOSITION.event_summary.v0] OR COMPOSITION c2[openEHR-EHR-COMPOSITION.fall.v1]) ";
 
-        // FIXME: this works when the operator is =, like '=2020', when it is gt like '=gt2020', the operator should be parsed from the value
         // processing _has:Encounter:patient:date=2020
         if (param.targetParamName.equals("date")) {
 
             String dateValue = param.getValue();
             String dateQuery = "";
 
+            /*
             if (dateValue.length() == 4) { // year only
                 dateQuery += "WHERE c1/context/start_time/value >= '" + dateValue + "-01-01' AND c1/context/start_time/value <= '" + dateValue + "-12-31' ";
                 dateQuery += "OR c2/context/start_time/value >= '" + dateValue + "-01-01' AND c2/context/start_time/value <= '" + dateValue + "-12-31' ";
             }
-            // TODO: extend to Y+M and Y+M+D
+            */
+
+            try {
+                dateQuery += "WHERE ("+ aqlDateConditions("c1/context/start_time/value", new String[]{dateValue}) +") OR ("+
+                             aqlDateConditions("c2/context/start_time/value", new String[]{dateValue}) +")";
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
 
             aql += dateQuery;
         } else {
@@ -622,15 +631,51 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
         ev/data[at0002]/items[at0022]/value // administrative gender
         */
 
+        String where = "WHERE";
+
         String[] values;
         for (String paramName : patientParams.keySet()) {
 
             values = patientParams.get(paramName);
 
             if (paramName.equals("birthdate")) {
+                if (where.length() > 5) {
+                    where += " AND ";
+                }
+                where += " "+ aqlDateConditions("cl1/items[at0001]/value", values);
 
-                LOG.info(aqlDateConditions("cl1/items[at0001]/value", values));
+            } else if (paramName.equals("gender")) {
+                if (values.length > 0) {
+                    if (where.length() > 5) {
+                        where += " AND ";
+                    }
+                    where += " ev/data[at0002]/items[at0022]/value = '" + values[0] +"'"; // TODO: check if the template uses codes
+                }
+            }
+        }
 
+        if (where.length() > 5) {
+            aql += where;
+        }
+
+        LOG.info(aql);
+
+        // execute query only if there is a matching supported param
+        if (aql.contains("WHERE")) {
+
+            // Execute the AQL
+            Query<Record1<String>> query = Query.buildNativeQuery(aql, String.class);
+
+            List<Record1<String>> results = new ArrayList<>();
+
+            try {
+                results = this.openEhrClient.aqlEndpoint().execute(query);
+
+                for (Record1<String> record : results) {
+                    subjectIds.add(record.value1());
+                }
+            } catch (Exception e) {
+                throw new InternalErrorException("There was a problem retrieving the result", e);
             }
         }
 
@@ -664,39 +709,48 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
             parsedDateParam = new DateParam(paramValues[i]);
             value = parsedDateParam.getValueAsString();
 
-            switch (parsedDateParam.getPrefix()) {
-                case EQUAL: // FIXME: previx null should also match equals
-                    // for equal to value year, the range for that year is created
-                    if (value.length() == 4) { // year only
-                        condition = attributePath +" >= '"+ value +"-01-01' AND "+ attributePath +" <= '"+ value +"-12-31'";
-                    }
-                    break;
-                case GREATERTHAN:
-                    operator = ">";
-                    if (value.length() == 4) { // year only
-                        operand = value +"-01-01";
-                    }
-                    break;
-                case GREATERTHAN_OR_EQUALS:
-                    operator = ">=";
-                    if (value.length() == 4) { // year only
-                        operand = value +"-01-01";
-                    }
-                    break;
-                case LESSTHAN:
-                    operator = "<";
-                    if (value.length() == 4) { // year only
-                        operand = value +"-12-31";
-                    }
-                    break;
-                case LESSTHAN_OR_EQUALS:
-                    operator = "<=";
-                    if (value.length() == 4) { // year only
-                        operand = value +"-12-31";
-                    }
-                    break;
-                default:
-                    throw new InternalErrorException("date param operator "+ parsedDateParam.getPrefix().name() + " not supported");
+            // no prefix is 'equals'
+            if (parsedDateParam.getPrefix() == null) {
+
+                if (value.length() == 4) { // year only
+                    condition = attributePath +" >= '"+ value +"-01-01' AND "+ attributePath +" <= '"+ value +"-12-31'";
+                }
+
+            } else {
+                switch (parsedDateParam.getPrefix()) {
+                    case EQUAL: // FIXME: previx null should also match equals
+                        // for equal to value year, the range for that year is created
+                        if (value.length() == 4) { // year only
+                            condition = attributePath + " >= '" + value + "-01-01' AND " + attributePath + " <= '" + value + "-12-31'";
+                        }
+                        break;
+                    case GREATERTHAN:
+                        operator = ">";
+                        if (value.length() == 4) { // year only
+                            operand = value + "-01-01";
+                        }
+                        break;
+                    case GREATERTHAN_OR_EQUALS:
+                        operator = ">=";
+                        if (value.length() == 4) { // year only
+                            operand = value + "-01-01";
+                        }
+                        break;
+                    case LESSTHAN:
+                        operator = "<";
+                        if (value.length() == 4) { // year only
+                            operand = value + "-12-31";
+                        }
+                        break;
+                    case LESSTHAN_OR_EQUALS:
+                        operator = "<=";
+                        if (value.length() == 4) { // year only
+                            operand = value + "-12-31";
+                        }
+                        break;
+                    default:
+                        throw new InternalErrorException("date param operator " + parsedDateParam.getPrefix().name() + " not supported");
+                }
             }
 
             if (i == 0) {
