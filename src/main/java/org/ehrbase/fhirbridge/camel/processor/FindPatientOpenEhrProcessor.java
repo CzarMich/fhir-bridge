@@ -18,6 +18,7 @@ package org.ehrbase.fhirbridge.camel.processor;
 
 import ca.uhn.fhir.rest.api.RestOperationTypeEnum;
 import ca.uhn.fhir.rest.api.server.RequestDetails;
+import ca.uhn.fhir.rest.param.DateParam;
 import ca.uhn.fhir.rest.param.HasParam;
 import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import org.apache.camel.Exchange;
@@ -40,6 +41,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -111,6 +113,9 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
         // be in this map, so based on the template, resource type and attribute name (code),
         // we know which path to use in the AQL
         Map<String, List<HasParamTemplate>> templateParamMap = new LinkedHashMap<>();
+
+        // Filters over patient attributes
+        Map<String, String[]> patientParams = new HashMap<>();
 
         for (String paramName : inParams.keySet()) {
 
@@ -214,6 +219,18 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
                         outParams.add(outParam);
                     }
                 }
+
+            } else if (paramName.equals("birthdate")) {
+
+                patientParams.put(paramName, paramValues);
+
+            } else if (paramName.equals("gender")) {
+
+                patientParams.put(paramName, paramValues);
+
+            } else {
+
+                LOG.warn("Param "+ paramName +" not supported");
             }
         }
 
@@ -231,6 +248,16 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
         Set<String> subjectIds = new HashSet<>();
         Set<String> tmpResult;
         boolean emptyResult = false;
+
+
+        // TEST
+        if (patientParams.size() > 0) {
+            try {
+                handleQueryForGECCO_Personendaten(patientParams);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
 
         // process queries not based on templates
         for (HasParamTemplate outParam : outParams) {
@@ -387,7 +414,7 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
                     // the value of the annotation will be the template we are looking for
 
                 } catch (NoSuchMethodException | SecurityException | IllegalAccessException | InvocationTargetException e) {
-                    System.out.println("oops 1");
+                    LOG.error(e.getMessage());
                 }
             }
 
@@ -572,6 +599,117 @@ public class FindPatientOpenEhrProcessor implements FhirRequestProcessor {
         }
 
         return subjectIds;
+    }
+
+    // query over DoB and gender
+    private Set<String> handleQueryForGECCO_Personendaten(Map<String, String[]> patientParams) throws Exception {
+
+        Set<String> subjectIds = new HashSet<>();
+
+        String aql = "SELECT e/ehr_status/subject/external_ref/id/value FROM EHR e ";
+
+        if (patientParams.containsKey("birthdate") && patientParams.containsKey("gender")) {
+            aql += "CONTAINS (CLUSTER cl1[openEHR-EHR-CLUSTER.person_birth_data_iso.v0] AND EVALUATION ev[openEHR-EHR-EVALUATION.gender.v1]) ";
+        } else if (patientParams.containsKey("birthdate")) {
+            aql += "CONTAINS CLUSTER cl1[openEHR-EHR-CLUSTER.person_birth_data_iso.v0] ";
+        } else if (patientParams.containsKey("gender")) {
+            aql += "CONTAINS EVALUATION ev[openEHR-EHR-EVALUATION.gender.v1] ";
+        }
+
+        /*
+        cl1/items[at0001]/value //dob
+
+        ev/data[at0002]/items[at0022]/value // administrative gender
+        */
+
+        String[] values;
+        for (String paramName : patientParams.keySet()) {
+
+            values = patientParams.get(paramName);
+
+            if (paramName.equals("birthdate")) {
+
+                LOG.info(aqlDateConditions("cl1/items[at0001]/value", values));
+
+            }
+        }
+
+        return subjectIds;
+    }
+
+    /**
+     *
+     * @param attributePath
+     * @param paramValues array of 'ge1981', 'lt2021', can only have 1 or 2 values, if one prefix is 'equals', there should be only one value. For the other previxes, one or two values represent a range.
+     * @return
+     */
+    private String aqlDateConditions(String attributePath, String[] paramValues) throws Exception {
+
+        if (paramValues.length == 0) {
+            throw new Exception("paramValues can't be empty");
+        }
+        if (paramValues.length > 2) {
+            throw new Exception("paramValues can't have more than 2 values");
+        }
+
+        String condition = "";
+
+        DateParam parsedDateParam;
+        String operator = "";
+        String operand = "";
+        String value = "";
+
+        for (int i = 0; i < paramValues.length; i++) {
+
+            parsedDateParam = new DateParam(paramValues[i]);
+            value = parsedDateParam.getValueAsString();
+
+            switch (parsedDateParam.getPrefix()) {
+                case EQUAL: // FIXME: previx null should also match equals
+                    // for equal to value year, the range for that year is created
+                    if (value.length() == 4) { // year only
+                        condition = attributePath +" >= '"+ value +"-01-01' AND "+ attributePath +" <= '"+ value +"-12-31'";
+                    }
+                    break;
+                case GREATERTHAN:
+                    operator = ">";
+                    if (value.length() == 4) { // year only
+                        operand = value +"-01-01";
+                    }
+                    break;
+                case GREATERTHAN_OR_EQUALS:
+                    operator = ">=";
+                    if (value.length() == 4) { // year only
+                        operand = value +"-01-01";
+                    }
+                    break;
+                case LESSTHAN:
+                    operator = "<";
+                    if (value.length() == 4) { // year only
+                        operand = value +"-12-31";
+                    }
+                    break;
+                case LESSTHAN_OR_EQUALS:
+                    operator = "<=";
+                    if (value.length() == 4) { // year only
+                        operand = value +"-12-31";
+                    }
+                    break;
+                default:
+                    throw new InternalErrorException("date param operator "+ parsedDateParam.getPrefix().name() + " not supported");
+            }
+
+            if (i == 0) {
+                if (condition.length() > 0) {
+                    break; // this will return the condition for the equals prefix
+                }
+                condition = attributePath +" "+ operator +" '"+ operand +"'";
+            } else {
+                condition += " AND "+ attributePath +" "+ operator +" '"+ operand +"'";
+            }
+        }
+
+        return condition;
     }
 
     /**
