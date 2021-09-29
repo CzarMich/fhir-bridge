@@ -990,13 +990,14 @@ executors:
               auth:
                 username: $DOCKER_USER
                 password: $DOCKER_HUB_PASSWORD
-            - image: ehrbase/ehrbase-postgres:11.10
+            - image: ehrbase/ehrbase-postgres:13.4
               auth:
                 username: $DOCKER_USER
                 password: $DOCKER_HUB_PASSWORD
               environment:
                 POSTGRES_USER: postgres
                 POSTGRES_PASSWORD: postgres
+                PGDATA: /tmp
             - image: minio/minio
               environment:
                   MINIO_ROOT_USER: minio
