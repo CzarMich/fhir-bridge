@@ -37,7 +37,6 @@ fhir-bridge:
       prefix: classpath:/opt/
       force-update: false
 # FHIR Properties
-#  fhir:
 #    jpa:
 #      allow-external-references:
 #      allow-inline-match-url-references:
